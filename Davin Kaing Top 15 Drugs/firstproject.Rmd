@@ -1,0 +1,235 @@
+---
+title: "Top 15 Drugs for each RxMG"
+output: word_document
+---
+
+
+## Summary
+The objective of this project is to identify the most frequently used drugs for each illness. To do this, the following four datasets were used: Drugs, ACG RxMGs, NDC2RxMG, and Prescriptions. The "Drug" dataset provides a summary of the drugs used and the National Drug Code (NDC) associated with the drug. The "ACG RxMGs" datset contains information about the Rx Medical Groups for each patient. The "NDC2RxMG" is a mapping file used to convert from NDC to RxMG. The "Prescription" dataset contains information about the prescription and the patients prescribed. These files were merged and the most frequent used drugs were identified and ranked. This process is done for three groups: commercial, Medical, and Medicare. 
+
+
+## Analysis 
+
+### Loading Packages
+The following packages were used for this analysis. The code below installs these packages if they are not already installed and load these packages into R.
+```{r, eval = F}
+# install "dplyr", "xlsx", "tcltk", and "ggplot2" if not already in installed
+packages <- c("dplyr", "xlsx", "tcltk","ggplot2")
+int <- packages %in% installed.packages()
+if(sum(!int)>0) {
+      install.packages(packages[!int])
+}
+# Loading data manipulation package "dplyr", excel package "xlsx", and interactive dialog box package "tcltk"
+library(dplyr)
+library(xlsx)
+library(tcltk)
+library(ggplot2)
+```
+
+### Data Import
+From the "tcltk" package, the command 'tk_choose.files' is used to prompt the users to select the appropriate files. Once these files are selected, they are loaded into R.
+
+``` {r, eval = F}
+# Interactive dialog box for user to select the appropriate files
+ndc2rxmg_file <- tk_choose.files(default = "", 
+                                 caption = "select the NDC2RxMG file")
+drugs_file <- tk_choose.files(default = "",
+                              caption = "select the Drugs file")
+acgrxmgs_file <- tk_choose.files(default = "",
+                                 caption = "select the ACGRxMGS file")
+prescription_file <- tk_choose.files(default = "",
+                                     caption = "select the Prescription file")
+
+# load the data into R
+ndc2rxmg <- read.delim(ndc2rxmg_file, header=FALSE, 
+                       colClasses = c("character", "character"))
+acgrxmgs <- read.delim(acgrxmgs_file, header=FALSE, 
+                       colClasses = rep("character", 8))
+drugs <- read.delim(drugs_file, header=FALSE, 
+                    colClasses = rep("character", 10), quote = "")
+prescription <- read.delim2(prescription_file, header=FALSE, 
+                            colClasses = rep("character", 10))
+
+```
+
+Each variables of the datasets loaded are labeled according to code book and the variables needed for this analysis are selected.
+
+``` {r, eval = F}
+# name the variables of the data 
+colnames(drugs) <- c("drug", "ndc", "brand", "tcgpi", 
+                     "cs", "ti", "ddid", "gpid", "hrm", "ras")
+colnames(acgrxmgs) <- c("id", "rxmg", "rxmgd", "mrxmg", 
+                        "mrxmgd", "rxmi", "msource", "psource")
+colnames(ndc2rxmg) <- c("ndc", "rxmg")
+colnames(prescription) <- c("cn", "id", "pid", "rxn", "nr", 
+                            "ndc", "fd", "brand", "ds", "model")
+
+# select the data to be used
+acgrxmgs <- acgrxmgs[, c("id","rxmg", "rxmgd")]
+prescription <- prescription[, c("id", "ndc")]
+drugs <- drugs[, c("drug", "ndc", "tcgpi")]
+```
+
+### Data Processing
+The datasets are then merged together whereby the ACGRxMGs dataset is joined with NDC2RxMG using the RxMG variable. Afterwards, this dataset is joined with Prescription by the NDC and ID Number (of the patients). Then, this entire dataset is merged with the Drugs dataset. After the merge, these are the variables in the dataset: id, rxmg, rxmgd, ndc, drug, and tcgpi.
+
+```{r, eval = F}
+# join the files together 
+data <- acgrxmgs %>% inner_join(ndc2rxmg, by = "rxmg") %>% 
+      inner_join(prescription, by = c("ndc", "id")) %>% 
+      inner_join(drugs, by = "ndc")
+```
+
+With the data above, the number of prescriptions is determined by first creating a variable in the data labeled nscripts, with a value of 1. The number of scripts per rxmg and drug is then computed by grouping the data with rxmg, rxmgd, drug, tcgpi, and summarising the total of nscripts. 
+
+``` {r, eval = F}
+# create a variable name nscripts with value 1 
+data$nscripts <- 1
+
+# summarize the total scripts per rxmg and drug
+nscripts <- data %>% group_by(rxmg, rxmgd, drug, tcgpi) %>% 
+      summarise(nscripts = sum(nscripts))
+
+```
+
+A similar procedure is done but grouping with the id (patient ID) as well. This is to get unique patients for each rxmg and drug. The scripts per unique patient is stored as "nsp". After this, a variable, npatients is created in the nsp data, with the value of 1, meaning each unique patient is counted as 1. To get the total number of patients per rxmg and drug, the nsp data is grouped and summarise by the sum of npatients. The datasets for the number of prescriptions and patients per rxmg and drug are stored as nscripts and npatients respectively. 
+
+``` {r, eval = F}
+# summarize the total scripts per patient for each rxmg and drug
+nsp <- data %>% group_by(rxmg, rxmgd, drug, tcgpi, id) %>% 
+      summarise(nsp = sum(nscripts))
+
+# assign npatients variable to nsp (number of scripts per patient) data
+nsp$npatients <- 1
+
+# summarize the number of patients for each rxmg and drug
+npatients <- nsp %>% group_by(rxmg, rxmgd, drug, tcgpi) %>% 
+      summarise(npatients = sum(npatients))
+
+```
+
+The nscripts and npatients then ordered according to the nscripts and npatients values in the datasets. They are arranged from greatest to smallest by rxmg. After the arrangement, the ranked datasets are joined to formed a combined ranked dataset.
+
+```{r, eval = F}
+# rank the number of scripts and group them by rxmg
+ranked_nscripts <- nscripts %>% arrange(rxmg, -nscripts) %>% 
+      group_by(rxmg)
+
+# rank the number of patients and group them by rxmg
+ranked_npatients <- npatients %>% arrange(rxmg, -npatients) %>% 
+      group_by(rxmg)
+
+# combine the ranked data for nscripts and npatients
+combined_ranked <- ranked_nscripts %>% 
+      inner_join(ranked_npatients, by = c("rxmg", "rxmgd", "drug", "tcgpi"))
+
+````
+
+The combined ranked data is then used to get the most frequently used drugs according to the rxmg. To do this, a forloop for each unique rxmg data is created. Inside this forloop, if the number of drugs (nrow of the data) is over 15, then the number 15 is stored as t. Else, t will be the number of the drugs present. The variable "t" is then used to store the top 15 (or less) drugs used. The data is stored as "top".
+
+```{r, eval = F}
+# create a forloop to look at each unique rxmg and rank the top 15 drugs or maximum number of drugs per rxmg
+unique_rxmg <- unique(ranked_nscripts$rxmg)
+top <- list()
+for(i in 1:length(unique_rxmg)) {
+      # extract the data for one unique rxmg
+      combined <- combined_ranked[combined_ranked$rxmg==unique_rxmg[i],]
+      # if there are more than 15 drugs, set t to 15 else set to the number of drugs
+      if(nrow(combined)>=15) {
+            t <- 15
+      } else {
+            t <- nrow(combined)
+      }
+      # rank the data from 1 to number of drugs, up to 15
+      combined$rank <- 1:nrow(combined)
+      # store data as list
+      top[[i]] <- combined[1:t, ]
+}
+# rbind all the data into a data frame
+top <- do.call(rbind, top)
+
+```
+From the "top" data, the appropriate variables is arrange to match the sample results file. 
+``` {r, eval = F}
+# select the appropriate variables
+results <- top[, c("rxmg", "rxmgd", "rank", "drug", "tcgpi", 
+                   "nscripts", "npatients")]
+```
+
+### Visualization of Results
+Here's a scatterplot showing the relationship between the number of scripts with the number of patients. The relationship appears to be linear which is as expected.
+
+```{r, eval = F}
+# plot showing relationship between number of scripts vs number of patients
+ggplot(results, aes(nscripts, npatients))+geom_point(color = "darkblue")+geom_smooth(method = "lm", color = "black") + 
+      xlab("Number of Scripts") + ylab("Number of Patients") + 
+      ggtitle("Number of Scripts vs Number of Patients") +
+      theme(plot.title = element_text(
+            family = "Trebuchet MS", color="#666666", face="bold", size=14))+
+      theme(axis.title = element_text(
+            family = "Trebuchet MS", color="#666666", face="bold", size=12))
+
+
+```
+
+Here's a histogram of the rank variable in the dataset:
+
+```{r, eval = F}
+# histogram of rank
+ggplot(results, aes(rank)) + geom_histogram(binwidth = 1)+
+      xlab("Rank") +ylab("Frequency") +
+      ggtitle("Figure 2: Histogram of Rank Variable") +
+      theme(plot.title = element_text(
+            family = "Trebuchet MS", color="#666666", face="bold", size=14))+
+      theme(axis.title = element_text(
+            family = "Trebuchet MS", color="#666666", face="bold", size=12))
+```
+
+The boxplot of the number of scripts (Figure 3) and number of patients (Figure 4) by rank is also consistant with the histogram of rank.
+
+```{r, eval = F}
+# boxplot of number of scripts by rank
+ggplot(results, aes(as.factor(rank), nscripts)) + 
+      geom_boxplot(outlier.color = "darkred",fill = "lightblue") + 
+      xlab("Rank") + ylab("Number of Scripts") + 
+      ggtitle("Figure 3: Number of Scripts by Rank") +
+      theme(plot.title = element_text(
+            family = "Trebuchet MS", color="#666666", face="bold", size=14))+
+      theme(axis.title = element_text(
+            family = "Trebuchet MS", color="#666666", face="bold", size=12))
+
+```
+
+
+``` {r, eval = F}
+# boxplot of number of patients by rank
+ggplot(results, aes(as.factor(rank), npatients)) + 
+      geom_boxplot(outlier.color = "darkred", fill = "orange") + 
+      xlab("Rank") + ylab("Number of Patients") + 
+      ggtitle("Figure 4: Number of Patients by Rank") +
+      theme(plot.title = element_text(
+            family = "Trebuchet MS", color="#666666", face="bold", size=14))+
+      theme(axis.title = element_text(
+            family = "Trebuchet MS", color="#666666", face="bold", size=12))
+```
+
+### Data Export 
+
+The variables of the results is relabeled to match the sample result file. The "results" dataset is then written as excel according to the project type: commercial, medicare, or medicaid.
+```{r, eval = F}
+# rename the variables
+colnames(results) <- c("RxMG", "description", "Rank", 
+                       "Drug Name", "Therapeutic Class (MediSpan)", 
+                       "# of scripts", "# of patients")
+# set data as data frame
+results <- as.data.frame(results)
+
+# output the data in xlsx format and name according to the project type (ie commercial)
+s <- strsplit(prescription_file, "/")
+type <- s[[1]][length(s[[1]])-2]
+write.xlsx2(results,paste(type, "results.xlsx", sep= "_"), row.names = F)
+```
+## Conclusion
+As expected, the relationship between the number of scripts and the number of patients appear to be linear. 
+
+
